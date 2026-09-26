@@ -1,0 +1,11 @@
+# Optional, in configuration.yaml. These sensors carry large attributes that change every
+# minute (issue lists, source timestamps, digest text). Excluding them keeps the Home Assistant
+# database small; the dashboard still shows their current values.
+recorder:
+  exclude:
+    entities:
+      - sensor.sysmonitor_status
+      - sensor.sysmonitor_log_sources
+      - sensor.sysmonitor_digest
+      - sensor.sysmonitor_netsentry_severity
+      - sensor.sysmonitor_array

@@ -1,0 +1,119 @@
+# SysMonitor dashboard. Add a new dashboard in Home Assistant, open the raw configuration editor,
+# and paste this (or paste only the view into an existing dashboard's "views:" list).
+# Uses core cards only. Entity IDs come from the MQTT device "SysMonitor".
+title: Home Lab
+views:
+  - title: Home Lab
+    path: homelab
+    icon: mdi:server-network
+    cards:
+      - type: markdown
+        content: |
+          {% set icon = {'ok':'🟢','low':'🟡','medium':'🟠','high':'🔴','critical':'🚨'} %}
+          {% set s = states('sensor.sysmonitor_status') %}
+          ## {{ icon.get(s, '⚪') }} Home lab: {{ s | upper }}
+          {% set issues = state_attr('sensor.sysmonitor_open_issues', 'issues') or [] %}
+          {% if issues %}
+          | | Issue | Source | Since |
+          |---|---|---|---|
+          {%- for i in issues[:15] %}
+          | {{ icon.get(i.severity, '⚪') }} | {{ i.title }} | {{ i.source }} | {{ as_timestamp(i.since) | timestamp_custom('%b %d %H:%M') }} |
+          {%- endfor %}
+          {% else %}
+          No open issues.
+          {% endif %}
+
+      - type: glance
+        title: Server
+        columns: 4
+        entities:
+          - entity: sensor.sysmonitor_cpu_temperature
+            name: CPU
+          - entity: sensor.sysmonitor_load
+            name: Load
+          - entity: sensor.sysmonitor_memory_used
+            name: Memory
+          - entity: sensor.sysmonitor_array
+            name: Array
+          - entity: sensor.sysmonitor_containers_down
+            name: Down
+          - entity: sensor.sysmonitor_container_updates
+            name: Updates
+          - entity: sensor.sysmonitor_log_rate
+            name: Logs/min
+          - entity: sensor.sysmonitor_errors_last_hour
+            name: Errors 1h
+
+      - type: markdown
+        title: AI digest
+        content: |
+          {% set d = state_attr('sensor.sysmonitor_digest', 'text') %}
+          {% if d %}_{{ state_attr('sensor.sysmonitor_digest', 'kind') | title }} digest, {{ as_timestamp(states('sensor.sysmonitor_digest')) | timestamp_custom('%a %H:%M') }}_
+
+          {{ d }}{% else %}No digest yet.{% endif %}
+
+      - type: markdown
+        title: Network scan (NetSentry)
+        content: |
+          {% set n = 'sensor.sysmonitor_netsentry_severity' %}
+          **Severity:** {{ states(n) | upper }} · **Last scan:** {% set ls = states('sensor.sysmonitor_netsentry_last_scan') %}{{ as_timestamp(ls) | timestamp_custom('%b %d %H:%M') if ls not in ('unknown', 'unavailable', 'None') else 'never' }} · **Hosts:** {{ state_attr(n, 'hosts_up') }} · **Open ports:** {{ state_attr(n, 'open_ports') }}
+
+          {{ state_attr(n, 'summary') or '' }}
+          {% for f in state_attr(n, 'findings') or [] %}
+          - {{ f }}
+          {%- endfor %}
+          {% set new = state_attr(n, 'new_hosts') or [] %}{% if new %}
+
+          **New devices:** {% for h in new %}{{ h.name }} ({{ h.ip }}){{ ', ' if not loop.last }}{% endfor %}{% endif %}
+
+      - type: markdown
+        title: Storage
+        content: |
+          {% set a = 'sensor.sysmonitor_array' %}
+          **Array:** {{ states(a) }} · **Unraid** {{ state_attr(a, 'version') }} · **Last parity check:** {% set lp = state_attr(a, 'last_parity_check') %}{{ as_timestamp(lp) | timestamp_custom('%b %d') if lp else '?' }} ({{ state_attr(a, 'sync_errors') }} errors)
+
+          | Disk | Device | Status | Temp | Errors |
+          |---|---|---|---|---|
+          {%- for d in state_attr(a, 'disks') or [] %}
+          | {{ d.name }} | {{ d.device }} | {{ '✅' if d.status == 'DISK_OK' else '❌ ' ~ d.status }} | {{ d.temp ~ '°C' if d.temp is not none else '-' }} | {{ d.errors }} |
+          {%- endfor %}
+          {% for p in state_attr(a, 'zfs_pools') or [] %}
+          **ZFS {{ p.pool }}:** {{ '✅ ONLINE' if p.state == 'ONLINE' else '❌ ' ~ p.state }}
+          {%- endfor %}
+
+      - type: markdown
+        title: Containers
+        content: |
+          {% set c = 'sensor.sysmonitor_containers_down' %}
+          **Running:** {{ state_attr(c, 'running') }}
+          {% set down = (state_attr(c, 'down') or []) + (state_attr(c, 'unhealthy') or []) %}
+          {% if down %}**Needs attention:** {{ down | join(', ') }}{% endif %}
+          {% set ups = state_attr('sensor.sysmonitor_container_updates', 'updates') or [] %}
+          {% if ups %}
+
+          **Updates available:**
+          {%- for u in ups %}
+          - {{ u.containers | join(', ') if u.containers else u.image }}
+          {%- endfor %}{% else %}
+
+          All images up to date.{% endif %}
+
+      - type: markdown
+        title: Log sources
+        content: |
+          | Source | Address | Last seen | Events 1h |
+          |---|---|---|---|
+          {%- for s in state_attr('sensor.sysmonitor_log_sources', 'sources') or [] %}
+          | {{ s.name }} | {{ s.ip }} | {{ s.minutes_ago }} min ago | {{ s.events_1h }} |
+          {%- endfor %}
+
+      - type: history-graph
+        title: Last 24 hours
+        hours_to_show: 24
+        entities:
+          - entity: sensor.sysmonitor_cpu_temperature
+            name: CPU °C
+          - entity: sensor.sysmonitor_log_rate
+            name: Logs/min
+          - entity: sensor.sysmonitor_open_issues
+            name: Open issues

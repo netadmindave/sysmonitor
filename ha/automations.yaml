@@ -1,0 +1,62 @@
+# Paste into Settings > Automations > (new) > Edit in YAML, one automation at a time.
+# Notifications appear in Home Assistant's notification panel (the bell in the sidebar) and are
+# updated in place rather than stacked. For phone pushes as well, uncomment the notify.mobile_app_*
+# blocks; find your exact action name under Developer tools > Actions by typing "mobile_app".
+
+- alias: SysMonitor - alert on high or critical status
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.sysmonitor_problem
+      to: "on"
+      for: "00:02:00"            # ignore blips
+    - trigger: state             # refresh the notification when issues change while alerting
+      entity_id: sensor.sysmonitor_open_issues
+  conditions:
+    - condition: state
+      entity_id: binary_sensor.sysmonitor_problem
+      state: "on"
+  actions:
+    - action: persistent_notification.create
+      data:
+        notification_id: sysmonitor_problem
+        title: "Home lab {{ states('sensor.sysmonitor_status') | upper }}"
+        message: >
+          {% for i in (state_attr('sensor.sysmonitor_open_issues', 'issues') or [])[:8] %}
+          - [{{ i.severity }}] {{ i.title }}
+          {% endfor %}
+    # - action: notify.mobile_app_your_phone
+    #   data:
+    #     title: "Home lab {{ states('sensor.sysmonitor_status') | upper }}"
+    #     message: >
+    #       {{ (state_attr('sensor.sysmonitor_open_issues', 'issues') or [])[:3]
+    #          | map(attribute='title') | join('; ') }}
+  mode: queued
+
+- alias: SysMonitor - clear alert when resolved
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.sysmonitor_problem
+      to: "off"
+      for: "00:05:00"
+  actions:
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: sysmonitor_problem
+
+- alias: SysMonitor - weekly round-up
+  triggers:
+    - trigger: state
+      entity_id: sensor.sysmonitor_digest
+  conditions:
+    - condition: template
+      value_template: "{{ state_attr('sensor.sysmonitor_digest', 'kind') == 'weekly' }}"
+  actions:
+    - action: persistent_notification.create
+      data:
+        notification_id: sysmonitor_weekly
+        title: Weekly home lab round-up
+        message: "{{ state_attr('sensor.sysmonitor_digest', 'text') }}"
+    # - action: notify.mobile_app_your_phone
+    #   data:
+    #     title: Weekly home lab round-up
+    #     message: Open Home Assistant to read this week's round-up.

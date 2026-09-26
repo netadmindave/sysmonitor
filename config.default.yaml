@@ -1,0 +1,130 @@
+# SysMonitor configuration. Read at start; restart the container after editing.
+db: /data/sysmonitor.db
+reports_dir: /data/reports
+retention_days: 14          # raw log events are deleted after this many days
+
+syslog:
+  udp_port: 5514
+  tcp_port: 5514            # accepts newline-framed and RFC 6587 octet-counted messages
+  allowed_sources: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8]
+  # Name your senders and say how often they should talk; silence becomes an issue.
+  sources: []
+  #  - {ip: 192.168.1.1, name: Gateway, expect_every_min: 30}
+  drop: []                  # regexes for messages to discard entirely (noisy, useless)
+
+http:
+  port: 8514                # dashboard page, JSON API and /ingest
+  allowed_sources: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8]
+  ingest_token_env: INGEST_TOKEN   # if set, POST /ingest needs header X-SysMonitor-Token
+  token_exempt: [127.0.0.1, "::1"] # senders that may post without the token (e.g. NetSentry's webhook)
+
+mqtt:                       # Home Assistant entities via MQTT discovery; leave host empty to disable
+  host: ""
+  port: 1883
+  username: ""
+  password_env: MQTT_PASSWORD
+  discovery_prefix: homeassistant
+  base_topic: sysmonitor
+  publish_every_s: 60
+
+ollama:                     # digests; leave url empty for plain (non-AI) digests
+  url: http://127.0.0.1:11434
+  model: qwen3:14b
+  num_ctx: 16384
+  think: false
+  timeout_s: 600
+
+digest:                     # cron schedules; remove a line to disable that digest
+  hourly: "5 * * * *"
+  daily: "0 7 * * *"
+  weekly: "0 8 * * 0"
+
+netsentry:
+  data_dir: /netsentry      # NetSentry's /data folder mounted read-only; empty to disable
+  stale_hours: 36
+
+unraid:
+  emhttp_dir: /unraid/emhttp                          # /var/local/emhttp mounted read-only
+  update_status_file: /unraid/unraid-update-status.json
+  autostart_file: /unraid/unraid-autostart            # only autostart containers are expected to run
+  disk_temp_warn: {hdd: 50, ssd: 65}
+
+host:
+  cpu_temp_warn: 85
+  mem_warn_pct: 95
+
+docker:
+  socket: /var/run/docker.sock   # optional; only read (GET) requests are made
+  ignore: []                     # container names never reported as down
+
+issues:
+  resolve_after_min: 60     # log-driven issues close after this long without new matching events
+
+# Rules turn log lines into issues. All conditions given must match:
+#   match (regex on message), app, source, fields (parsed fields, e.g. NPM status/client/vhost),
+#   max_level (syslog level, 3 = error). threshold hits within window_min open or refresh an issue.
+#   group_by: source | app | ip | field:<name>. Title placeholders: group keys, {source}, {app}, {count}.
+rules:
+  - id: auth_failure
+    match: 'Failed password|Invalid user|authentication failure|invalid authentication'
+    category: security
+    severity: medium
+    threshold: 5
+    window_min: 10
+    title: "Repeated login failures on {source} ({count} in 10 min)"
+  - id: ids_alert
+    match: '\bIPS\b|\bIDS\b|threat|intrusion'
+    category: security
+    severity: high
+    title: "Intrusion detection alert from {source}"
+    window_min: 60
+  - id: storage_error
+    match: 'I/O error|Medium Error|\bUNC\b|failed command|md: disk\d+ (read|write) error|zio.*error'
+    category: storage
+    severity: critical
+    window_min: 60
+    title: "Disk or I/O error reported by {source}"
+  - id: out_of_memory
+    match: 'Out of memory|oom-kill|Killed process'
+    category: system
+    severity: high
+    window_min: 60
+    title: "Out-of-memory kill on {source}"
+  - id: kernel_trace
+    match: 'Call Trace|BUG:|general protection fault|segfault'
+    category: system
+    severity: medium
+    window_min: 60
+    title: "Kernel or process crash on {source}"
+  - id: wan_event
+    match: 'WAN.*(fail|down|offline)|failover'
+    category: network
+    severity: high
+    window_min: 30
+    title: "WAN failover or outage reported by {source}"
+  - id: web_auth_denied
+    app: 'npm|nginx'
+    fields: {status: '^(401|403)$'}
+    category: security
+    severity: medium
+    threshold: 20
+    window_min: 10
+    group_by: [field:client]
+    title: "{client} refused {count} times in 10 min by the reverse proxy"
+  - id: web_server_errors
+    app: 'npm|nginx'
+    fields: {status: '^5\d\d$'}
+    category: services
+    severity: medium
+    threshold: 10
+    window_min: 10
+    group_by: [field:vhost]
+    title: "{vhost} returned {count} server errors in 10 min"
+  - id: error_burst
+    max_level: 3
+    category: logs
+    severity: low
+    threshold: 50
+    window_min: 10
+    group_by: [source, app]
+    title: "{count} errors in 10 min from {app} on {source}"
