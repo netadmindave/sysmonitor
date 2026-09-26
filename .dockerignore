@@ -1,0 +1,8 @@
+.git
+.github
+ha
+sources
+README.md
+CHANGELOG.md
+__pycache__
+*.db
